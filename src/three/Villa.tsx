@@ -5,6 +5,8 @@ import { S, wake } from '../animation/state';
 import type { VillaModel } from './assemble';
 import { assets, loadTextures } from './assets';
 import { SWEEP, shared } from './materials';
+import { loadFurniture, type Furniture } from './furniture';
+import { loadSky } from './sky';
 import { Annotations } from '../ui/Annotations';
 
 /** frames drawn fully built behind the loading screen (see `warm` below) */
@@ -20,6 +22,17 @@ export function Villa({ model, onReady }: { model: VillaModel; onReady: () => vo
   const settle = useRef(0);
   const frames = useRef(0);
   const compiled = useRef(false);
+  const furniture = useRef<Furniture | null>(null);
+  const alive = useRef(true);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      furniture.current?.dispose();
+      furniture.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     // Shadows are rendered on demand only (see below), never every frame.
@@ -100,6 +113,21 @@ export function Villa({ model, onReady }: { model: VillaModel; onReady: () => vo
       onReady();
       // now that the page is up, fetch the real surface textures in the background
       loadTextures(gl);
+      // ...the photo of the sky, and the furniture models
+      loadSky(gl);
+      loadFurniture(gl, scene, camera)
+        .then((f) => {
+          if (!alive.current) return f.dispose();
+          furniture.current = f;
+        })
+        .catch((e) => console.warn('Furniture failed to load', e));
+    }
+    const f = furniture.current;
+    if (f) {
+      const was = f.group.visible;
+      f.update(camera);
+      // the new pieces need to be in the shadow map
+      if (f.group.visible && !was) settle.current = 8;
     }
   });
 

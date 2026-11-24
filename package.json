@@ -6,7 +6,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "shots": "node scripts/shots.mjs",
-    "textures": "node scripts/compress-textures.mjs"
+    "textures": "node scripts/compress-textures.mjs",
+    "sky": "node scripts/make-sky.mjs",
+    "models": "node scripts/fetch-models.mjs && node scripts/shrink-models.mjs"
   },
   "repository": {
     "type": "git",

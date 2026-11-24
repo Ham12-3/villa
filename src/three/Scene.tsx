@@ -13,6 +13,7 @@ import { site } from '../data/villa';
 import { lights as interiorLights } from '../data/interior';
 import { assets } from './assets';
 import { SWEEP, shared } from './materials';
+import { SKY_GLSL, sky } from './sky';
 import type { VillaModel } from './assemble';
 import { Villa } from './Villa';
 
@@ -27,6 +28,8 @@ const CAMERA_DAMPING = 3.4;
 const MSAA = env.mobile ? 2 : 4;
 const POSE_KEYS = ['tx', 'ty', 'tz', 'radius', 'polar', 'azimuth', 'fov'] as const;
 const TOUR_KEYS = ['ex', 'ey', 'ez', 'lx', 'ly', 'lz', 'fov'] as const;
+/** far clip plane: past the edge of the ground, which runs to the horizon */
+const FAR = 3200;
 /** real point lights shared between all the rooms */
 const LAMP_SLOTS = 2;
 
@@ -65,6 +68,8 @@ function Rig() {
     // background is the <Backdrop> gradient, not the HDRI.
     scene.environment = assets.environment;
     scene.environmentRotation.set(0, assets.sunAzimuth - Math.atan2(SUN.z, SUN.x), 0);
+    // the visible sky is the same photo, turned the same way
+    sky.uSkyRot.value = assets.sunAzimuth - Math.atan2(SUN.z, SUN.x);
     return () => {
       scene.environment = null;
     };
@@ -106,7 +111,7 @@ function Rig() {
     // model, a wider lens and a near plane of 25 cm once inside the room
     cam3.fov = cam.fov + (tour.fov - cam.fov) * touring;
     cam3.near = 2 + (0.25 - 2) * smooth(104, 116, rig.at);
-    cam3.far = 900 + (300 - 900) * smooth(104, 116, rig.at);
+    cam3.far = FAR;
     cam3.updateProjectionMatrix();
     const markers = Math.max(S.marker0, S.marker1, S.marker2, S.marker3) * S.markerFade;
     const f = frame(cam3, cam, base, w, h, {
@@ -214,6 +219,8 @@ const smooth = (a: number, b: number, x: number) => {
  * everything, which warms slowly and continuously with scroll, from the cool
  * near-black of the drawing board to a deep evening tone with a low glow
  * behind the house. No stage ever swaps the background; it only drifts.
+ * As the model materialises the gradient gives way to the real evening sky
+ * (see sky.ts), looked up by view direction so it turns with the camera.
  */
 function Backdrop() {
   const material = useMemo(
@@ -228,6 +235,12 @@ function Backdrop() {
           uWarmTop: { value: new THREE.Color('#161210') },
           uWarmBottom: { value: new THREE.Color('#2c231d') },
           uGlow: { value: new THREE.Color('#4d3626') },
+          uProjInv: { value: new THREE.Matrix4() },
+          uCamWorld: { value: new THREE.Matrix4() },
+          uSkyMap: sky.uSkyMap,
+          uSkyRot: sky.uSkyRot,
+          uSkyGain: sky.uSkyGain,
+          uSkyMix: sky.uSkyMix,
         },
         vertexShader: /* glsl */ `
           varying vec2 vUv;
@@ -243,6 +256,10 @@ function Backdrop() {
           uniform vec3 uWarmTop;
           uniform vec3 uWarmBottom;
           uniform vec3 uGlow;
+          uniform mat4 uProjInv;
+          uniform mat4 uCamWorld;
+          uniform float uSkyMix;
+          ${SKY_GLSL}
           varying vec2 vUv;
           void main() {
             float v = smoothstep(0.0, 1.0, vUv.y);
@@ -252,6 +269,11 @@ function Backdrop() {
             vec2 g = (vUv - vec2(0.56, 0.36)) * vec2(1.25, 2.7);
             warm += uGlow * exp(-dot(g, g)) * 0.4;
             vec3 c = mix(cool, warm, uWarm);
+            if (uSkyMix > 0.0) {
+              vec4 far = uProjInv * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+              vec3 dir = normalize(mat3(uCamWorld) * (far.xyz / far.w));
+              c = mix(c, skyColor(dir), uSkyMix);
+            }
             // a little grain so the gradient never bands
             float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
             c += (n - 0.5) * 0.0035;
@@ -262,15 +284,121 @@ function Backdrop() {
     [],
   );
   useEffect(() => () => material.dispose(), [material]);
-  useFrame(() => {
+  useFrame(({ camera }, delta) => {
     // warms across two thirds of the scroll, not inside one chapter
     material.uniforms.uWarm.value = smooth(30, 97, rig.at);
+    // the sky arrives with the materials (and eases in if its photo is late)
+    sky.loaded = sky.ready ? Math.min(1, sky.loaded + Math.min(delta, 0.05) * 1.6) : 0;
+    sky.uSkyMix.value = smooth(0.12, 0.95, S.mat) * sky.loaded;
+    if (sky.ready && sky.loaded < 1) wake(2);
+    camera.updateMatrixWorld();
+    material.uniforms.uProjInv.value.copy(camera.projectionMatrixInverse);
+    material.uniforms.uCamWorld.value.copy(camera.matrixWorld);
   });
   return (
     <mesh material={material} renderOrder={-1000} frustumCulled={false}>
       <planeGeometry args={[2, 2]} />
     </mesh>
   );
+}
+
+/**
+ * The land around the plot: a meadow running to the horizon, where it fades
+ * into the lowest band of the sky. Arrives with the sky; takes the sun's
+ * shadows of the house and trees.
+ */
+function Ground() {
+  const { geometry, material } = useMemo(() => {
+    // a disc with the plot cut out (the site model fills that)
+    const xs = site.plot.map((p) => p[0]);
+    const zs = site.plot.map((p) => p[1]);
+    const inset = 0.6;
+    const shape = new THREE.Shape();
+    shape.absarc(0, 0, 2600, 0, Math.PI * 2, false);
+    const hole = new THREE.Path();
+    const x0 = Math.min(...xs) + inset;
+    const x1 = Math.max(...xs) - inset;
+    const z0 = Math.min(...zs) + inset;
+    const z1 = Math.max(...zs) - inset;
+    // (shape y is world -z after the plane is laid flat)
+    hole.moveTo(x0, -z0);
+    hole.lineTo(x0, -z1);
+    hole.lineTo(x1, -z1);
+    hole.lineTo(x1, -z0);
+    hole.closePath();
+    shape.holes.push(hole);
+    const geometry = new THREE.ShapeGeometry(shape, 72);
+    geometry.rotateX(-Math.PI / 2);
+    geometry.translate(0, -0.15, 0);
+
+    const material = new THREE.MeshStandardMaterial({
+      color: '#c6d2a0',
+      roughness: 1,
+      metalness: 0,
+      map: assets.textures.grass.map,
+      transparent: true,
+      depthWrite: false,
+    });
+    material.onBeforeCompile = (shader) => {
+      shader.uniforms.uSkyMap = sky.uSkyMap;
+      shader.uniforms.uSkyRot = sky.uSkyRot;
+      shader.uniforms.uSkyGain = sky.uSkyGain;
+      shader.uniforms.uSkyMix = sky.uSkyMix;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vGPos;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\nvGPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace(
+          '#include <common>',
+          /* glsl */ `#include <common>
+          uniform float uSkyMix;
+          varying vec3 vGPos;
+          ${SKY_GLSL}
+          float gHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+          float gNoise(vec2 p) {
+            vec2 i = floor(p);
+            vec2 f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
+            return mix(mix(gHash(i), gHash(i + vec2(1, 0)), f.x), mix(gHash(i + vec2(0, 1)), gHash(i + vec2(1, 1)), f.x), f.y);
+          }`,
+        )
+        .replace(
+          '#include <map_fragment>',
+          /* glsl */ `
+          float gDist = length(vGPos - cameraPosition);
+          // grass blades close by, dissolving into broad drifts of tone far off
+          vec3 gTex = texture2D(map, vGPos.xz / 3.4).rgb;
+          vec3 gFar = vec3(0.066, 0.1, 0.03);
+          diffuseColor.rgb *= mix(gTex, gFar, smoothstep(18.0, 90.0, gDist));
+          float gDrift = gNoise(vGPos.xz * 0.045) * 0.6 + gNoise(vGPos.xz * 0.011 + 9.0) * 0.4;
+          diffuseColor.rgb *= mix(vec3(0.78, 0.86, 0.7), vec3(1.3, 1.18, 0.9), gDrift);`,
+        )
+        .replace(
+          '#include <dithering_fragment>',
+          /* glsl */ `
+          vec3 gDir = (vGPos - cameraPosition) / gDist;
+          float gFog = 1.0 - exp(-pow(gDist / 900.0, 1.4));
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, skyHaze(gDir), gFog);
+          gl_FragColor.a = uSkyMix;
+          #include <dithering_fragment>`,
+        );
+    };
+    return { geometry, material };
+  }, []);
+  useEffect(
+    () => () => {
+      geometry.dispose();
+      material.dispose();
+    },
+    [geometry, material],
+  );
+  const ref = useRef<THREE.Mesh>(null);
+  useFrame(() => {
+    if (ref.current) ref.current.visible = sky.uSkyMix.value > 0.001;
+    // the real grass texture arrives late: same slot, no recompile
+    if (material.map !== assets.textures.grass.map) material.map = assets.textures.grass.map;
+  });
+  return <mesh ref={ref} geometry={geometry} material={material} renderOrder={-900} frustumCulled={false} receiveShadow />;
 }
 
 /**
@@ -288,6 +416,7 @@ function ContactShadow() {
       depthWrite: false,
       uniforms: {
         uMat: shared.uMat,
+        uSkyMix: sky.uSkyMix,
         uCentre: { value: new THREE.Vector2(cx, cz) },
         uHalf: { value: new THREE.Vector2((Math.max(...xs) - Math.min(...xs)) / 2, (Math.max(...zs) - Math.min(...zs)) / 2) },
         // the shadow leans away from the sun
@@ -303,6 +432,7 @@ function ContactShadow() {
       `,
       fragmentShader: /* glsl */ `
         uniform float uMat;
+        uniform float uSkyMix;
         uniform vec2 uCentre;
         uniform vec2 uHalf;
         uniform vec2 uLean;
@@ -314,7 +444,8 @@ function ContactShadow() {
         void main() {
           float tight = 1.0 - smoothstep(-1.5, 4.0, box(vP - uCentre, uHalf));
           float wide = 1.0 - smoothstep(-4.0, 30.0, box(vP - uCentre - uLean, uHalf));
-          float a = (tight * 0.5 + wide * wide * 0.42) * uMat;
+          // (much lighter once there is real ground, with real shadows, under it)
+          float a = (tight * 0.5 + wide * wide * 0.42) * uMat * (1.0 - 0.72 * uSkyMix);
           gl_FragColor = vec4(0.012, 0.008, 0.006, a);
         }
       `,
@@ -457,8 +588,9 @@ export function Scene({ model, onReady }: { model: VillaModel | null; onReady: (
     >
       {model && (
         <>
-          <Backdrop />
           <Rig />
+          <Backdrop />
+          <Ground />
           <ContactShadow />
           <Villa model={model} onReady={onReady} />
         </>

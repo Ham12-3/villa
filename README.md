@@ -9,7 +9,9 @@ the swimming pool, through an arch into the pool lounge, and out to the
 garden for a last look back. Scrolling back reverses everything.
 
 The walkthrough route is `src/data/tour.ts` (eye and look-at points through the
-real door openings) and the furnishings are `src/data/interior.ts`.
+real door openings) and the furnishings are `src/data/interior.ts`: hand-built
+pieces (sofas, beds, joinery, curtains) plus a list of real furniture models
+and where they stand.
 
 ## Run
 
@@ -29,8 +31,12 @@ GSAP ScrollTrigger (one master timeline) and Lenis for smooth scroll.
 
 - **One source of truth.** `src/data/villa.ts` describes the site, levels, walls,
   openings, stairs, terraces and rooftop. Both the 2D plans and the 3D building
-  are generated from it by the builders in `src/three/builders`. There is no
-  downloaded model.
+  are generated from it by the builders in `src/three/builders`. The building
+  is never a downloaded model; only loose furniture and plants are
+  (`src/three/furniture.ts`).
+- **A real sky.** Once the model materialises, the backdrop becomes the same
+  evening sky that lights it, and a meadow runs from the plot to the horizon
+  (`src/three/sky.ts`, `Ground` in `src/three/Scene.tsx`).
 - **One timeline.** `src/animation/timeline.ts` tweens plain numbers in
   `src/animation/state.ts`, scrubbed by scroll. The render loop copies them into
   shader uniforms. No React state changes while scrolling.
@@ -53,6 +59,8 @@ GSAP ScrollTrigger (one master timeline) and Lenis for smooth scroll.
 - Shaders are compiled in parallel behind the loading screen.
 - three.js and the scene are separate chunks loaded after the page shell.
 - Surface textures are KTX2 (Basis) with mipmaps, loaded after first paint.
+- Furniture models and the sky photo load after the page is revealed; model
+  textures upload one per frame and pieces far from the camera are not drawn.
 - `prefers-reduced-motion` gets a stepped version with cross-fades.
 
 ## Scripts
@@ -62,6 +70,8 @@ GSAP ScrollTrigger (one master timeline) and Lenis for smooth scroll.
 - `node scripts/motion.mjs` checks the camera spline and measures frame-by-frame motion.
 - `node scripts/perf.mjs` measures load time and frame times.
 - `npm run textures` re-encodes `assets-src/tex` to KTX2 in `public/assets/tex`.
+- `npm run models` downloads the furniture models and resizes their textures.
+- `npm run sky` resizes the sky photo in `assets-src/sky` to `public/assets/sky.jpg`.
 
 ## Review switches
 
@@ -71,4 +81,4 @@ renders every frame.
 
 ## Assets
 
-CC0 HDRI and textures from Poly Haven; see `public/assets/CREDITS.md`.
+CC0 HDRI, textures, sky photo and furniture models from Poly Haven; see `public/assets/CREDITS.md`.

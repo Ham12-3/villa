@@ -29,10 +29,10 @@ export type InteriorMaterial =
 
 export interface Piece {
   material: InteriorMaterial;
-  shape: 'box' | 'cyl' | 'sphere';
+  shape: 'box' | 'cyl' | 'sphere' | 'curtain';
   /** centre */
   c: [number, number, number];
-  /** size: width, height, depth (for cyl / sphere these are diameters) */
+  /** size: width, height, depth (for cyl / sphere these are diameters; for a curtain, depth is the depth of its folds) */
   s: [number, number, number];
   /** rotation about the vertical axis, radians */
   rot?: number;
@@ -50,6 +50,13 @@ type V3 = [number, number, number];
 const box = (material: InteriorMaterial, c: V3, s: V3, rot = 0): Piece => ({ material, shape: 'box', c, s, rot });
 const cyl = (material: InteriorMaterial, c: V3, s: V3): Piece => ({ material, shape: 'cyl', c, s });
 const sph = (material: InteriorMaterial, c: V3, s: V3): Piece => ({ material, shape: 'sphere', c, s });
+/** A drawn-back linen curtain hanging in the x direction: bottom at y0, `height` tall. */
+const curtain = (x: number, y0: number, z: number, width: number, height: number): Piece => ({
+  material: 'fabric',
+  shape: 'curtain',
+  c: [x, y0 + height / 2, z],
+  s: [width, height, 0.07],
+});
 
 /** Local -> world for a piece group rotated about Y at (x, z). */
 const placer = (x: number, y0: number, z: number, rot: number) => {
@@ -75,25 +82,6 @@ function sofa(x: number, z: number, length: number, rot = 0, y0 = 0, m: Interior
     out.push(box(m, at(lx, 0.72, 0.26), [w - 0.1, 0.36, 0.16], rot));
   }
   return out;
-}
-
-/** Lounge chair with a low back. Faces -z before rotation. */
-function armchair(x: number, z: number, rot = 0, y0 = 0, m: InteriorMaterial = 'fabric'): Piece[] {
-  const at = placer(x, y0, z, rot);
-  return [
-    box(m, at(0, 0.21, 0), [0.86, 0.42, 0.86], rot),
-    box(m, at(0, 0.6, 0.36), [0.86, 0.46, 0.16], rot),
-    box(m, at(-0.36, 0.48, 0), [0.14, 0.3, 0.86], rot),
-    box(m, at(0.36, 0.48, 0), [0.14, 0.3, 0.86], rot),
-  ];
-}
-
-function diningChair(x: number, z: number, facing: 1 | -1): Piece[] {
-  return [
-    box('fabric', [x, 0.46, z], [0.46, 0.08, 0.46]),
-    box('fabric', [x, 0.78, z + facing * 0.21], [0.46, 0.5, 0.06]),
-    box('dark', [x, 0.21, z], [0.4, 0.42, 0.4]),
-  ];
 }
 
 /** Olive in a planter. */
@@ -124,12 +112,8 @@ const living: Piece[] = [
   box('rug', [SEATING[0], 0.04, SEATING[1]], [6.6, 0.03, 3.8]),
   ...sofa(0.2, -0.95, 3.4, 0),
   ...sofa(-3.0, -2.9, 2.6, -Math.PI / 2),
-  ...armchair(2.9, -3.9, 0.5),
-  // coffee table: timber slab on a dark plinth, a tray of books and a bowl
-  box('wood', [SEATING[0], 0.37, SEATING[1]], [1.7, 0.06, 0.95]),
-  box('dark', [SEATING[0], 0.17, SEATING[1]], [1.25, 0.34, 0.55]),
-  box('art', [SEATING[0] - 0.45, 0.43, SEATING[1] + 0.1], [0.34, 0.06, 0.26], 0.2),
-  cyl('ceramic', [SEATING[0] + 0.42, 0.45, SEATING[1] - 0.1], [0.34, 0.1, 0.34]),
+  // (marble coffee table, lounge chairs, vases and plants are real models: see `models`)
+  box('art', [SEATING[0] - 0.3, 0.52, SEATING[1] + 0.12], [0.34, 0.05, 0.26], 0.2),
   // fire wall on the back wall, with a long low hearth and a slot of fire
   box('dark', [2.2, 1.72, -5.3], [4.4, 3.44, 0.24]),
   box('stone', [2.2, 0.2, -5.0], [4.9, 0.4, 0.62]),
@@ -137,14 +121,15 @@ const living: Piece[] = [
   // sideboard, canvas and a lamp under the gallery
   box('wood', [-4.2, 0.4, -5.12], [2.5, 0.8, 0.5]),
   box('art', [-4.2, 2.05, -5.4], [1.7, 1.25, 0.04]),
-  cyl('ceramic', [-3.4, 0.98, -5.12], [0.22, 0.36, 0.22]),
   box('rail', [-5.2, 0.8, -4.9], [0.03, 1.6, 0.03]),
   box('glow', [-5.2, 1.72, -4.9], [0.3, 0.34, 0.3]),
   // reading corner and planting at the east end
-  ...armchair(9.6, -2.2, Math.PI / 2),
   cyl('wood', [10.4, 0.25, -3.4], [0.5, 0.5, 0.5]),
   ...plant(10.9, -4.7),
   ...plant(-5.2, 0.6, 0, 0.9),
+  // full-height linen at each end of the glazing
+  curtain(-5.3, 0.03, 1.2, 1.1, 7.3),
+  curtain(11.3, 0.03, 1.2, 1.1, 7.3),
 ];
 
 const dining: Piece[] = [
@@ -153,18 +138,12 @@ const dining: Piece[] = [
   box('wood', [DINING[0], 0.75, DINING[1]], [3.5, 0.06, 1.15]),
   box('dark', [DINING[0] - 1.25, 0.36, DINING[1]], [0.1, 0.72, 0.9]),
   box('dark', [DINING[0] + 1.25, 0.36, DINING[1]], [0.1, 0.72, 0.9]),
-  ...[-1.2, -0.4, 0.4, 1.2].flatMap((dx) => [
-    ...diningChair(DINING[0] + dx, DINING[1] - 0.86, -1),
-    ...diningChair(DINING[0] + dx, DINING[1] + 0.86, 1),
-  ]),
   // table setting
-  cyl('ceramic', [DINING[0] - 0.6, 0.86, DINING[1]], [0.26, 0.16, 0.26]),
   cyl('brass', [DINING[0] + 0.5, 0.9, DINING[1]], [0.07, 0.24, 0.07]),
   cyl('brass', [DINING[0] + 0.75, 0.87, DINING[1] + 0.1], [0.07, 0.18, 0.07]),
   // buffet with a mirror on the west wall
   box('wood', [-19.5, 0.43, -1.4], [0.5, 0.86, 3.2]),
   box('mirror', [-19.78, 1.9, -1.4], [0.04, 1.4, 2.4]),
-  cyl('ceramic', [-19.5, 1.05, -2.3], [0.24, 0.4, 0.24]),
   ...plant(-18.6, 2.6),
 ];
 
@@ -187,8 +166,6 @@ const kitchen: Piece[] = [
   box('ceramic', [-12.6, 0.93, -9.2], [4.2, 0.06, 1.35]),
   box('ceramic', [-14.67, 0.48, -9.2], [0.06, 0.96, 1.35]),
   box('ceramic', [-10.53, 0.48, -9.2], [0.06, 0.96, 1.35]),
-  cyl('ceramic', [-13.5, 1.05, -9.3], [0.36, 0.14, 0.36]),
-  cyl('olive', [-13.5, 1.2, -9.3], [0.3, 0.2, 0.3]),
   ...[-14.0, -13.1, -12.2, -11.3].flatMap((x) => stool(x, -8.2)),
 ];
 
@@ -198,14 +175,10 @@ const lobby: Piece[] = [
   // round table with a tall arrangement in the middle of the hall
   cyl('dark', [6, 0.38, -10.2], [0.5, 0.76, 0.5]),
   cyl('ceramic', [6, 0.79, -10.2], [1.5, 0.06, 1.5]),
-  cyl('ceramic', [6, 1.0, -10.2], [0.26, 0.36, 0.26]),
-  sph('olive', [6, 1.4, -10.2], [0.5, 0.46, 0.5]),
-  sph('olive', [6.14, 1.58, -10.12], [0.3, 0.3, 0.3]),
   box('art', [5.5, 0.85, -10.05], [0.34, 0.06, 0.26], 0.3),
   // console and tall mirror on the east wall, bench opposite
   box('wood', [9.62, 0.42, -9.2], [0.44, 0.84, 2.4]),
   box('mirror', [9.86, 1.95, -9.2], [0.04, 1.7, 1.5]),
-  cyl('brass', [9.62, 1.0, -8.4], [0.1, 0.32, 0.1]),
   box('fabricDark', [2.5, 0.24, -10.6], [0.5, 0.48, 1.8]),
   box('art', [2.12, 1.9, -10.6], [0.04, 1.2, 1.6]),
   ...plant(9.3, -6.2, 0, 0.95),
@@ -217,7 +190,6 @@ const lounge: Piece[] = [
   box('rug', [-16.2, 0.04, 6.6], [5.2, 0.03, 4.2]),
   ...sofa(-16.2, 4.75, 3.6, Math.PI, 0, 'fabric'),
   ...sofa(-18.6, 6.9, 2.6, -Math.PI / 2, 0, 'fabric'),
-  ...armchair(-14.2, 7.6, 2.4),
   cyl('stone', [-16.1, 0.2, 6.6], [1.3, 0.4, 1.3]),
   cyl('brass', [-16.1, 0.45, 6.6], [0.3, 0.1, 0.3]),
   // daybeds by the south-west arch
@@ -289,23 +261,92 @@ const bedroom: Piece[] = [
   box('fabric', [17.7, F + 0.76, -4.92], [0.75, 0.22, 0.45]),
   box('fabricDark', [17.2, F + 0.8, -4.62], [0.6, 0.18, 0.3]),
   // bedside tables with lamps, and a bench at the foot
-  box('wood', [15.75, F + 0.26, -5.0], [0.55, 0.52, 0.45]),
-  box('wood', [18.65, F + 0.26, -5.0], [0.55, 0.52, 0.45]),
-  cyl('brass', [15.75, F + 0.68, -5.0], [0.05, 0.32, 0.05]),
-  cyl('brass', [18.65, F + 0.68, -5.0], [0.05, 0.32, 0.05]),
-  cyl('glow', [15.75, F + 0.92, -5.0], [0.24, 0.2, 0.24]),
-  cyl('glow', [18.65, F + 0.92, -5.0], [0.24, 0.2, 0.24]),
+  cyl('brass', [15.75, F + 0.71, -5.0], [0.05, 0.32, 0.05]),
+  cyl('brass', [18.65, F + 0.71, -5.0], [0.05, 0.32, 0.05]),
+  cyl('glow', [15.75, F + 0.95, -5.0], [0.24, 0.2, 0.24]),
+  cyl('glow', [18.65, F + 0.95, -5.0], [0.24, 0.2, 0.24]),
   box('fabric', [17.2, F + 0.22, -2.7], [1.7, 0.44, 0.46]),
   // wardrobe wall, dressing mirror, and a chair by the glass
   box('wood', [23.5, F + 1.2, -3.4], [0.62, 2.4, 3.6]),
   box('dark', [23.18, F + 1.2, -3.4], [0.02, 2.2, 0.02]),
   box('mirror', [23.18, F + 1.25, -1.0], [0.03, 2.0, 0.8]),
-  ...armchair(21.6, -0.2, -2.3, F),
   cyl('wood', [20.6, F + 0.25, 0.4], [0.46, 0.5, 0.46]),
   ...plant(12.9, 0.7, F, 1.0),
+  curtain(12.75, F + 0.03, 1.2, 1.1, 3.6),
+  curtain(23.25, F + 0.03, 1.2, 1.1, 3.6),
 ];
 
 export const pieces: Piece[] = [...living, ...dining, ...kitchen, ...lobby, ...lounge, ...bathroom, ...bedroom];
+
+// ---------------------------------------------------------------- real models
+
+export type ModelId =
+  | 'mid_century_lounge_chair'
+  | 'modern_arm_chair_01'
+  | 'dining_chair_02'
+  | 'coffee_table_round_01'
+  | 'side_table_01'
+  | 'ceramic_vase_01'
+  | 'ceramic_vase_02'
+  | 'potted_plant_02'
+  | 'potted_plant_04';
+
+export interface Placement {
+  model: ModelId;
+  /** position of the model's base */
+  pos: V3;
+  /** which way it faces, radians about the vertical axis (0 = towards +z, the garden) */
+  rot?: number;
+  scale?: number;
+}
+
+/** angle that makes a model at (x, z) face the point (tx, tz) */
+const facing = (x: number, z: number, tx: number, tz: number) => Math.atan2(tx - x, tz - z);
+const put = (model: ModelId, pos: V3, rot = 0, scale = 1): Placement => ({ model, pos, rot, scale });
+
+/**
+ * CC0 furniture and decor from Poly Haven (public/assets/models), placed at
+ * real size. These load after the page is revealed.
+ */
+export const models: Placement[] = [
+  // living room
+  put('coffee_table_round_01', [SEATING[0], 0.024, SEATING[1]]),
+  put('mid_century_lounge_chair', [2.9, 0.024, -3.9], facing(2.9, -3.9, SEATING[0], SEATING[1])),
+  put('mid_century_lounge_chair', [9.5, 0.024, -2.2], facing(9.5, -2.2, 4, -2.6)),
+  put('potted_plant_04', [SEATING[0] + 0.35, 0.515, SEATING[1] - 0.15], 0.6, 1.5),
+  put('ceramic_vase_02', [0.7, 0.4, -5.0], 0, 1.7),
+  put('ceramic_vase_01', [1.15, 0.4, -5.05], 0, 1.5),
+  put('potted_plant_02', [-3.5, 0.8, -5.12], 1.2),
+  // dining room: eight chairs, north side facing the garden and south side facing back
+  ...[-1.2, -0.4, 0.4, 1.2].flatMap((dx) => [
+    put('dining_chair_02', [DINING[0] + dx, 0.07, DINING[1] - 0.72], 0),
+    put('dining_chair_02', [DINING[0] + dx, 0.07, DINING[1] + 0.72], Math.PI),
+  ]),
+  put('ceramic_vase_02', [DINING[0] - 0.55, 0.78, DINING[1]], 0, 1.4),
+  put('ceramic_vase_01', [-19.5, 0.86, -2.3], 0, 1.6),
+  put('potted_plant_04', [-19.5, 0.86, -0.5], 2.1, 1.6),
+  // kitchen
+  put('potted_plant_02', [-13.6, 0.96, -9.3], 0.4, 0.8),
+  put('ceramic_vase_01', [-11.9, 0.96, -9.1], 0, 1.2),
+  // lobby
+  put('potted_plant_02', [6, 0.82, -10.2], 2.4, 1.15),
+  put('ceramic_vase_01', [9.62, 0.84, -8.45], 0, 1.7),
+  put('ceramic_vase_02', [9.62, 0.84, -9.9], 0, 1.3),
+  // pool lounge
+  put('mid_century_lounge_chair', [-14.2, 0.024, 7.7], facing(-14.2, 7.7, -16.1, 6.6)),
+  put('modern_arm_chair_01', [-11.6, 0.024, 9.4], facing(-11.6, 9.4, -15, 7)),
+  put('side_table_01', [-12.7, 0.024, 9.9], 0.3),
+  put('potted_plant_04', [-12.7, 0.575, 9.9], 1.0, 1.5),
+  put('potted_plant_04', [-9.9, 1.085, 3.95], 0.2, 1.4),
+  // bathroom
+  put('potted_plant_04', [20.0, F + 0.48, -8.4], 0.5, 1.5),
+  put('ceramic_vase_02', [15.5, F + 0.81, -5.8], 0, 1.2),
+  // master bedroom
+  put('side_table_01', [15.75, F + 0.024, -5.0]),
+  put('side_table_01', [18.65, F + 0.024, -5.0]),
+  put('modern_arm_chair_01', [21.5, F + 0.024, -0.4], facing(21.5, -0.4, 17.2, -3.4)),
+  put('ceramic_vase_01', [20.6, F + 0.5, 0.4], 0, 1.4),
+];
 
 /** Glass globes: pendants in each room. */
 export const lamps: Lamp[] = [
