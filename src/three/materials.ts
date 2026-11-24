@@ -195,7 +195,17 @@ export type SolidKind =
   | 'water'
   | 'cypress'
   | 'olive'
-  | 'trunk';
+  | 'trunk'
+  | 'floor'
+  | 'rug'
+  | 'fabric'
+  | 'dark'
+  | 'art'
+  | 'glow'
+  | 'fabricDark'
+  | 'ceramic'
+  | 'mirror'
+  | 'brass';
 
 interface SolidSpec {
   color: string;
@@ -216,6 +226,9 @@ interface SolidSpec {
   /** strength / frequency of the procedural tone + roughness variation */
   noise?: number;
   noiseFreq?: number;
+  /** self-lit surfaces (lamps, fire) */
+  emissive?: string;
+  emissiveIntensity?: number;
   /** extra shader behaviour */
   mode?: 'glass' | 'water' | 'foliage';
   /** absent (discarded) until the materialisation front reaches it */
@@ -261,6 +274,17 @@ const SOLIDS: Record<SolidKind, SolidSpec> = {
   cypress: { color: '#2c3f2a', roughness: 1, metalness: 0, noise: 0.55, noiseFreq: 2.4, mode: 'foliage' },
   olive: { color: '#56664a', roughness: 1, metalness: 0, noise: 0.5, noiseFreq: 2.0, mode: 'foliage' },
   trunk: { color: '#4b3b2e', roughness: 1, metalness: 0, noise: 0.3, noiseFreq: 3 },
+  // interior fit-out
+  floor: { color: '#c7a480', roughness: 0.78, metalness: 0, tex: 'wood', texSize: 2.4, normalScale: 0.35 },
+  rug: { color: '#93877a', roughness: 1, metalness: 0, noise: 0.3, noiseFreq: 9 },
+  fabric: { color: '#d3cbbd', roughness: 1, metalness: 0, noise: 0.16, noiseFreq: 14 },
+  dark: { color: '#2a2622', roughness: 0.62, metalness: 0.1, noise: 0.2, noiseFreq: 2.2 },
+  art: { color: '#7a5f4a', roughness: 0.9, metalness: 0, noise: 0.55, noiseFreq: 1.4 },
+  glow: { color: '#1a1410', roughness: 0.4, metalness: 0, emissive: '#ffb878', emissiveIntensity: 5 },
+  fabricDark: { color: '#57534c', roughness: 1, metalness: 0, noise: 0.18, noiseFreq: 14 },
+  ceramic: { color: '#efece6', roughness: 0.28, metalness: 0, noise: 0.05, noiseFreq: 1.3 },
+  mirror: { color: '#d5dcde', roughness: 0.04, metalness: 1, envIntensity: 1.5 },
+  brass: { color: '#b48d52', roughness: 0.32, metalness: 1 },
 };
 
 export interface SolidUniforms extends RevealUniforms {
@@ -335,6 +359,8 @@ export function makeSolidMaterial(kind: SolidKind, c: RevealConfig = {}, lite = 
     depthWrite: !s.transparent,
     side: s.doubleSide ? THREE.DoubleSide : THREE.FrontSide,
     envMapIntensity: s.envIntensity ?? 1,
+    emissive: s.emissive ?? '#000000',
+    emissiveIntensity: s.emissiveIntensity ?? 1,
     // push faces back a hair so their edge lines never z-fight
     polygonOffset: true,
     polygonOffsetFactor: 1.5,

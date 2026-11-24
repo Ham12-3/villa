@@ -67,11 +67,11 @@ export type StateKey = keyof State;
 /** 0..1 arrival animation, played once after loading (not scroll-driven) */
 export const intro = { v: 0 };
 
-/** scroll position (0..100) the camera spline is sampled at */
+/** story position (0..STORY_END) the camera spline is sampled at */
 export const rig = { at: 0 };
 
 /** the damped pose the camera is actually at this frame (written by the rig) */
-export const cam = { tx: 0, ty: 0, tz: 0, radius: 170, polar: 0.4, azimuth: 0 };
+export const cam = { tx: 0, ty: 0, tz: 0, radius: 170, polar: 0.4, azimuth: 0, fov: 30 };
 
 const mq = (q: string) => typeof window !== 'undefined' && window.matchMedia(q).matches;
 

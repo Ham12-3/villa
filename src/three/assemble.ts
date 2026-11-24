@@ -7,7 +7,7 @@ import {
   stairs,
   terraces,
 } from '../data/villa';
-import { clamp01, debug, env, intro, type State } from '../animation/state';
+import { clamp01, debug, env, intro, rig, type State } from '../animation/state';
 import {
   makeLineMaterial,
   makeSolidMaterial,
@@ -27,8 +27,15 @@ import { buildPergola } from './builders/buildPergola';
 import { buildTrees } from './builders/buildTrees';
 import { buildGrid, buildSiteLines, buildSiteSolids } from './builders/buildSite';
 import { buildPlanters, buildTower } from './builders/buildRooftop';
+import { buildInterior } from './builders/buildInterior';
+import { glassClear } from '../data/tour';
 
 type Num = (s: State) => number;
+
+const ramp = (a: number, b: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
 
 export interface RoomLabel {
   position: P3;
@@ -65,6 +72,8 @@ interface PartOptions {
   drawStagger?: number;
   fadeRadius?: number;
   shadows?: boolean;
+  /** 0..1 opacity of the solids (only meaningful for transparent materials) */
+  fade?: Num;
   /** hide solids until this returns true */
   solidWhen?: (s: State) => boolean;
 }
@@ -158,8 +167,12 @@ export async function assembleVilla(onProgress: (p: number, label: string) => vo
       const d = o.draw ? o.draw(s) : 1;
       const a = o.opacity ? o.opacity(s) : 1;
       const built = p > 0.0005;
-      const solidOn = built && (!o.solidWhen || o.solidWhen(s));
-      for (const m of solidMats) m.userData.u.uProg.value = p;
+      const fade = o.fade ? o.fade(s) : 1;
+      const solidOn = built && fade > 0.003 && (!o.solidWhen || o.solidWhen(s));
+      for (const m of solidMats) {
+        m.userData.u.uProg.value = p;
+        m.userData.u.uFade.value = fade;
+      }
       for (const obj of solidObjs) obj.visible = solidOn;
       // once the sweep has passed, swept linework is fully gone: skip the draw
       const linesOn = built && d > 0.0005 && a > 0.004 && (o.keepLines || s.mat < 0.999);
@@ -255,7 +268,9 @@ export async function assembleVilla(onProgress: (p: number, label: string) => vo
     part({ boxes: [w.frames, 'frame'] }, { reveal: { growAxis: [1, 1, 1], stagger: 2.2 }, prog: (s) => s.frames });
     part(
       { solids: [[w.glass, 'glass']], lines: w.glassLines },
-      { reveal: { growAxis: [0, 1, 0], stagger: 2.2 }, prog: (s) => s.glass, shadows: false },
+      // the panes clear while the camera tours (it passes through the glazing
+      // three times) and return for the last look back at the house
+      { reveal: { growAxis: [0, 1, 0], stagger: 2.2 }, prog: (s) => s.glass, shadows: false, fade: () => 1 - ramp(glassClear.out[0], glassClear.out[1], rig.at) + ramp(glassClear.back[0], glassClear.back[1], rig.at) },
     );
   });
 
@@ -297,6 +312,20 @@ export async function assembleVilla(onProgress: (p: number, label: string) => vo
       { boxes: [buildRailings([rooftop.parapet]), 'rail'] },
       { reveal: { growAxis: [0, 1, 0], stagger: 2 }, prog: (s) => s.roofDetails },
     );
+  });
+
+  // ---------------------------------------------------------------- interior
+  step('Furnishing the rooms', () => {
+    // Furniture is not part of the drawing: it exists once the building starts
+    // to materialise, and is lit up by the same sweep as everything else.
+    const inside = buildInterior();
+    const built: Num = (s) => (s.mat > 0.001 ? 1 : 0);
+    for (const [kind, set] of inside.boxes) {
+      part({ boxes: [set, kind] }, { prog: built, opacity: () => 0 });
+    }
+    for (const [kind, geom] of inside.round) {
+      part({ solids: [[geom, kind]] }, { prog: built, shadows: kind !== 'glow' });
+    }
   });
 
   step('Planting the trees', () => {

@@ -241,8 +241,8 @@ const first: Level = {
       [-6, 12.5],
       [-20, 12.5],
     ],
-    // void over the double-height living room
-    holes: [rect(-5.6, -5.2, 11.6, 1.1)],
+    // void over the double-height living room, and the stair opening
+    holes: [rect(-5.6, -5.2, 11.6, 1.1), rect(-3.2, -8.8, 1.6, -7.2)],
     thickness: 0.3,
     top: ELEVATIONS.first,
   },

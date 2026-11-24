@@ -12,7 +12,7 @@ await page.waitForTimeout(1000);
 const spline = await page.evaluate(async () => {
   const { createCameraPath } = await import('/src/animation/cameraPath.ts');
   const f = createCameraPath(false);
-  const o = { tx: 0, ty: 0, tz: 0, radius: 0, polar: 0, azimuth: 0 };
+  const o = { tx: 0, ty: 0, tz: 0, radius: 0, polar: 0, azimuth: 0, fov: 30 };
   let prev = null, minPolar = 1e9, polarDrops = 0, maxStep = 0, maxAccel = 0, prevV = null;
   for (let i = 0; i <= 2000; i++) {
     const p = { ...f(i / 20, o) };

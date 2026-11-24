@@ -23,7 +23,6 @@ function Words({ text }: { text: string }) {
 }
 
 export function Overlay({ blocks, scrollHint }: Props) {
-  const last = chapters.length - 1;
   return (
     <div className="overlay">
       <header className="brand">
@@ -37,7 +36,7 @@ export function Overlay({ blocks, scrollHint }: Props) {
           ref={(el) => {
             blocks.current[i] = el;
           }}
-          className={`chapter${i === 0 ? ' chapter--hero' : ''}${i === last ? ' chapter--final' : ''}`}
+          className={`chapter${i === 0 ? ' chapter--hero' : ''}`}
           aria-hidden={i !== 0}
         >
           <p className="chapter__eyebrow">{c.eyebrow}</p>
@@ -57,14 +56,6 @@ export function Overlay({ blocks, scrollHint }: Props) {
           <p className="chapter__desc" aria-label={c.description}>
             {i === 0 ? c.description : <Words text={c.description} />}
           </p>
-          {i === last && (
-            <a className="cta" href="mailto:viewings@villaserein.example?subject=Private%20viewing">
-              <span>Arrange a private viewing</span>
-              <svg width="18" height="10" viewBox="0 0 18 10" aria-hidden="true">
-                <path d="M0 5h16M12 1l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1" />
-              </svg>
-            </a>
-          )}
         </section>
       ))}
 

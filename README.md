@@ -2,7 +2,14 @@
 
 A scroll-driven 3D architectural story. As you scroll, a villa goes from a 2D
 site plan to the finished house: Site, Plan, Structure, Floors, Details,
-Rooftop, Material, Villa. Scrolling back reverses everything.
+Rooftop, Material, Villa. Then a walkthrough: in over the pool and through the
+glazing to the living room, entrance lobby, dining room and kitchen, up the
+stair to the gallery, bathroom and master bedroom, out over the terrace to
+the swimming pool, through an arch into the pool lounge, and out to the
+garden for a last look back. Scrolling back reverses everything.
+
+The walkthrough route is `src/data/tour.ts` (eye and look-at points through the
+real door openings) and the furnishings are `src/data/interior.ts`.
 
 ## Run
 

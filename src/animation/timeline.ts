@@ -1,7 +1,7 @@
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import Lenis from 'lenis';
-import { chapterAt, chapters } from '../data/chapters';
+import { STORY_END, chapterAt, chapters } from '../data/chapters';
 import { S, env, rig, wake, type StateKey } from './state';
 
 gsap.registerPlugin(ScrollTrigger);
@@ -22,12 +22,12 @@ interface Options {
   overlays: HTMLElement[];
   scrollHint: HTMLElement | null;
   onChapter: (index: number) => void;
-  /** smoothed story position (0..100), called whenever it changes */
+  /** smoothed story position (0..STORY_END), called whenever it changes */
   onProgress?: (percent: number) => void;
 }
 
 /**
- * The single master timeline. Its duration is 100 "percent units" and it is
+ * The single master timeline. Its duration is STORY_END story units and it is
  * scrubbed 1:1 by the page scroll, so every tween below is positioned by the
  * scroll percentage at which it should happen and reverses for free.
  */
@@ -107,7 +107,7 @@ function buildTimeline(o: Options) {
 
   // CAMERA — a single linear tween moves the sample point along the
   // camera spline; all easing lives in the spline itself (cameraPath.ts)
-  tl.fromTo(rig, { at: 0 }, { at: 100, duration: 100, ease: 'none', immediateRender: false }, 0);
+  tl.fromTo(rig, { at: 0 }, { at: STORY_END, duration: STORY_END, ease: 'none', immediateRender: false }, 0);
 
   // CHAPTER COPY — headline and body rise line by line from behind a mask,
   // scrubbed by scroll like everything else. Each block hands over to the
@@ -148,17 +148,13 @@ function buildTimeline(o: Options) {
           at + 0.15 + k * 0.2,
         );
       });
-      const cta = el.querySelector('.cta');
-      if (cta) {
-        tl.fromTo(cta, { autoAlpha: 0, y: 12 }, { autoAlpha: 1, y: 0, duration: 0.9, ease: 'power2.out', immediateRender: false }, at + 0.5 + lines.length * 0.2);
-      }
     }
-    if (i < chapters.length - 1) {
+    if (i < chapters.length - 1 || c.copyOut !== undefined) {
       tl.fromTo(
         el,
         { autoAlpha: 1, y: 0 },
         { autoAlpha: 0, y: -22, duration: 0.8, ease: 'power2.in', immediateRender: false },
-        c.end - 0.3,
+        c.copyOut ?? c.end - 0.3,
       );
     }
   });
@@ -166,8 +162,8 @@ function buildTimeline(o: Options) {
     tl.fromTo(o.scrollHint, { autoAlpha: 1 }, { autoAlpha: 0, duration: 2, immediateRender: false }, 1);
   }
 
-  // pad the timeline to exactly 100 units
-  tl.set({}, {}, 100);
+  // pad the timeline to exactly STORY_END units
+  tl.set({}, {}, STORY_END);
   return tl;
 }
 
@@ -179,7 +175,7 @@ export function createStory(o: Options): Story {
   let raf: ((time: number) => void) | null = null;
 
   const maxScroll = () => document.documentElement.scrollHeight - window.innerHeight;
-  const yFor = (percent: number) => (percent / 100) * maxScroll();
+  const yFor = (at: number) => (at / STORY_END) * maxScroll();
 
   const setChapter = (i: number) => {
     if (i === current) return false;
@@ -191,7 +187,7 @@ export function createStory(o: Options): Story {
   let trigger: ScrollTrigger;
   let lastP = -1;
   const feed = () => {
-    const p = tl.progress() * 100;
+    const p = tl.progress() * STORY_END;
     if (Math.abs(p - lastP) < 0.005) return;
     lastP = p;
     wake(); // the picture is changing: keep the canvas rendering
@@ -209,12 +205,12 @@ export function createStory(o: Options): Story {
       start: 'top top',
       end: 'bottom bottom',
       onUpdate: (self) => {
-        const i = chapterAt(self.progress * 100);
+        const i = chapterAt(self.progress * STORY_END);
         if (!setChapter(i)) return;
         window.clearTimeout(stepTimer);
         o.stage.style.opacity = '0';
         stepTimer = window.setTimeout(() => {
-          tl.progress(chapters[i].rest / 100);
+          tl.progress(chapters[i].rest / STORY_END);
           o.stage.style.opacity = '1';
         }, 360);
       },
@@ -235,9 +231,9 @@ export function createStory(o: Options): Story {
       end: 'bottom bottom',
       // the timeline trails the scroll position, so nothing ever snaps
       scrub: env.mobile ? 0.6 : 1.1,
-      onUpdate: (self) => setChapter(chapterAt(self.progress * 100)),
+      onUpdate: (self) => setChapter(chapterAt(self.progress * STORY_END)),
     });
-    setChapter(chapterAt(trigger.progress * 100));
+    setChapter(chapterAt(trigger.progress * STORY_END));
   }
 
   const scrollTo = (y: number, duration: number) => {

@@ -1,4 +1,5 @@
 import { cameraPath, cameraPathMobile, type CameraKey, type CameraPose } from '../data/chapters';
+import { TOUR_START, tourKeys } from '../data/tour';
 
 /**
  * One continuous camera move for the whole story.
@@ -60,6 +61,7 @@ export interface PoseValues {
   radius: number;
   polar: number;
   azimuth: number;
+  fov: number;
 }
 
 export function createCameraPath(mobile: boolean) {
@@ -72,8 +74,9 @@ export function createCameraPath(mobile: boolean) {
   const radius = ch((p) => p.radius);
   const polar = ch((p) => p.polar);
   const azimuth = ch((p) => p.azimuth);
+  const fov = ch((p) => p.fov ?? 30);
 
-  /** write the pose at scroll position `at` (0..100) into `out` */
+  /** write the pose at story position `at` into `out` */
   return (at: number, out: PoseValues) => {
     out.tx = tx.at(at);
     out.ty = ty.at(at);
@@ -81,6 +84,48 @@ export function createCameraPath(mobile: boolean) {
     out.radius = radius.at(at);
     out.polar = polar.at(at);
     out.azimuth = azimuth.at(at);
+    out.fov = fov.at(at);
+    return out;
+  };
+}
+
+export interface TourValues {
+  ex: number;
+  ey: number;
+  ez: number;
+  lx: number;
+  ly: number;
+  lz: number;
+  fov: number;
+}
+
+/**
+ * The walkthrough (data/tour.ts) as the same kind of monotone spline, over
+ * eye and look-at points. `start` is where the model view leaves the camera
+ * at TOUR_START, so the hand-over is seamless. On small (portrait) screens
+ * the lens is widened, since a tall frame sees much less of a room.
+ */
+export function createTourPath(start: TourValues, mobile: boolean) {
+  const keys = [{ at: TOUR_START, eye: [start.ex, start.ey, start.ez], look: [start.lx, start.ly, start.lz], fov: start.fov }, ...tourKeys];
+  const xs = keys.map((k) => k.at);
+  const ch = (pick: (k: (typeof keys)[number]) => number) => new Channel(xs, keys.map(pick));
+  const c = {
+    ex: ch((k) => k.eye[0]),
+    ey: ch((k) => k.eye[1]),
+    ez: ch((k) => k.eye[2]),
+    lx: ch((k) => k.look[0]),
+    ly: ch((k) => k.look[1]),
+    lz: ch((k) => k.look[2]),
+    fov: ch((k) => (k.at <= TOUR_START ? k.fov : mobile ? Math.min(82, k.fov * 1.3) : k.fov)),
+  };
+  return (at: number, out: TourValues) => {
+    out.ex = c.ex.at(at);
+    out.ey = c.ey.at(at);
+    out.ez = c.ez.at(at);
+    out.lx = c.lx.at(at);
+    out.ly = c.ly.at(at);
+    out.lz = c.lz.at(at);
+    out.fov = c.fov.at(at);
     return out;
   };
 }

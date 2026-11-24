@@ -5,10 +5,12 @@ import { Bloom, EffectComposer, N8AO, SMAA, ToneMapping, Vignette } from '@react
 import { BlendFunction, ToneMappingMode } from 'postprocessing';
 import gsap from 'gsap';
 import { S, activity, cam, debug, env, intro, rig, wake } from '../animation/state';
-import { createCameraPath, type PoseValues } from '../animation/cameraPath';
+import { createCameraPath, createTourPath, type PoseValues, type TourValues } from '../animation/cameraPath';
+import { TOUR_START } from '../data/tour';
 import { createFraming, placeCamera } from '../animation/framing';
 import { LABEL_COLUMN, view } from '../animation/view';
 import { site } from '../data/villa';
+import { lights as interiorLights } from '../data/interior';
 import { assets } from './assets';
 import { SWEEP, shared } from './materials';
 import type { VillaModel } from './assemble';
@@ -23,7 +25,10 @@ const SUN = new THREE.Vector3(-58, 27, 44);
 const CAMERA_DAMPING = 3.4;
 /** multisampling for the scene buffer: real anti-aliasing for the 1px linework */
 const MSAA = env.mobile ? 2 : 4;
-const POSE_KEYS = ['tx', 'ty', 'tz', 'radius', 'polar', 'azimuth'] as const;
+const POSE_KEYS = ['tx', 'ty', 'tz', 'radius', 'polar', 'azimuth', 'fov'] as const;
+const TOUR_KEYS = ['ex', 'ey', 'ez', 'lx', 'ly', 'lz', 'fov'] as const;
+/** real point lights shared between all the rooms */
+const LAMP_SLOTS = 2;
 
 /** Camera rig + lighting, all driven from the scroll state every frame. */
 function Rig() {
@@ -31,8 +36,27 @@ function Rig() {
   const sun = useRef<THREE.DirectionalLight>(null);
   const frame = useMemo(() => createFraming(), []);
   const samplePath = useMemo(() => createCameraPath(env.mobile), []);
-  const goal = useMemo<PoseValues>(() => ({ tx: 0, ty: 0, tz: 0, radius: 0, polar: 0, azimuth: 0 }), []);
+  const goal = useMemo<PoseValues>(() => ({ tx: 0, ty: 0, tz: 0, radius: 0, polar: 0, azimuth: 0, fov: 30 }), []);
+  const lamps = useRef<(THREE.PointLight | null)[]>([]);
   const settled = useRef(false);
+  const aspectNow = size.width / size.height;
+  // The walkthrough starts from wherever the model view leaves the camera.
+  const sampleTour = useMemo(() => {
+    const pose = samplePath(TOUR_START, { tx: 0, ty: 0, tz: 0, radius: 0, polar: 0, azimuth: 0, fov: 30 });
+    const probe = new THREE.PerspectiveCamera();
+    placeCamera(probe, pose, pose.radius * (aspectNow < 1.5 ? Math.min(2.15, 1.5 / aspectNow) : 1));
+    return createTourPath(
+      { ex: probe.position.x, ey: probe.position.y, ez: probe.position.z, lx: pose.tx, ly: pose.ty, lz: pose.tz, fov: pose.fov },
+      env.mobile,
+    );
+  }, [samplePath, aspectNow]);
+  const tourGoal = useMemo<TourValues>(() => ({ ex: 0, ey: 0, ez: 0, lx: 0, ly: 0, lz: 0, fov: 30 }), []);
+  const tour = useMemo<TourValues>(() => ({ ex: 0, ey: 0, ez: 0, lx: 0, ly: 0, lz: 0, fov: 30 }), []);
+  const tourReady = useRef(false);
+  const eye = useMemo(() => new THREE.Vector3(), []);
+  const look = useMemo(() => new THREE.Vector3(), []);
+  const order = useMemo(() => interiorLights.map((_, i) => i), []);
+  const weights = useMemo(() => interiorLights.map(() => 0), []);
   const fr = useRef({ zoom: 1, dx: 0, dy: 0, ready: false });
 
   useEffect(() => {
@@ -57,6 +81,14 @@ function Rig() {
     settled.current = true;
     for (const key of POSE_KEYS) cam[key] += (goal[key] - cam[key]) * k;
 
+    // The walkthrough has its own eye / look-at path, followed with the same
+    // damping, and takes over from the model view just after TOUR_START.
+    sampleTour(Math.max(TOUR_START, rig.at), tourGoal);
+    const kt = tourReady.current ? k : 1;
+    tourReady.current = true;
+    for (const key of TOUR_KEYS) tour[key] += (tourGoal[key] - tour[key]) * kt;
+    const touring = smooth(TOUR_START, TOUR_START + 4, rig.at);
+
     // pull back on narrow / portrait screens so the villa always fits
     const aspect = size.width / size.height;
     const fit = aspect < 1.5 ? Math.min(2.15, 1.5 / aspect) : 1;
@@ -70,13 +102,20 @@ function Rig() {
     const w = size.width;
     const h = size.height;
     cam3.clearViewOffset();
+    // lens and clip planes follow the move: a long lens and deep range for the
+    // model, a wider lens and a near plane of 25 cm once inside the room
+    cam3.fov = cam.fov + (tour.fov - cam.fov) * touring;
+    cam3.near = 2 + (0.25 - 2) * smooth(104, 116, rig.at);
+    cam3.far = 900 + (300 - 900) * smooth(104, 116, rig.at);
+    cam3.updateProjectionMatrix();
     const markers = Math.max(S.marker0, S.marker1, S.marker2, S.marker3) * S.markerFade;
     const f = frame(cam3, cam, base, w, h, {
       // the whole plot is the subject on the site plan and once it is built
       wholeSite: Math.max(1 - smooth(18, 26, rig.at), smooth(79, 85, rig.at)),
       reserveRight: smooth(0, 0.3, markers) * (view.stacked ? 84 : LABEL_COLUMN),
     });
-    const on = smooth(5, 11, rig.at);
+    // (released again as the camera leaves the model view to go inside)
+    const on = smooth(5, 11, rig.at) * (1 - touring);
     // the answer changes when the copy block changes with the chapter, so it
     // is followed with the same kind of damping as the camera itself
     const kf = fr.current.ready && !env.reducedMotion ? 1 - Math.exp(-delta * 2.6) : 1;
@@ -86,6 +125,18 @@ function Rig() {
     fr.current.dy += (f.dy - fr.current.dy) * kf;
     placeCamera(cam3, cam, base * (1 + (fr.current.zoom - 1) * on));
     cam3.setViewOffset(w, h, -fr.current.dx * on, fr.current.dy * on, w, h);
+    if (touring > 0) {
+      // hand over from the orbiting model view to the walkthrough path
+      eye.set(tour.ex, tour.ey, tour.ez);
+      look.set(
+        cam.tx + (tour.lx - cam.tx) * touring,
+        cam.ty + (tour.ly - cam.ty) * touring,
+        cam.tz + (tour.lz - cam.tz) * touring,
+      );
+      cam3.position.lerp(eye, touring);
+      cam3.lookAt(look);
+      cam3.updateMatrixWorld();
+    }
     // labels are projected with exactly this camera, in this same frame
     for (const fn of view.listeners) fn(cam3, w, h);
 
@@ -98,22 +149,58 @@ function Rig() {
     const lit = smooth(0, 0.14, m);
     scene.environmentIntensity = lit * 0.27;
     if (sun.current) sun.current.intensity = lit * 3.9;
+    // Room lighting: there is one warm light per room in the data, but only
+    // LAMP_SLOTS real lights. Each frame they are given to the rooms that
+    // matter most: the ones that glow in the exterior views, then, on the
+    // walkthrough, whichever rooms the camera is nearest (faded by distance,
+    // so a light is always dark when its slot is reassigned).
+    const near = smooth(104, 112, rig.at);
+    for (let i = 0; i < interiorLights.length; i++) {
+      const l = interiorLights[i];
+      const d = Math.hypot(cam3.position.x - l.pos[0], cam3.position.y - l.pos[1], cam3.position.z - l.pos[2]);
+      const proximity = (1 - smooth(7, 16, d)) * near;
+      weights[i] = Math.max(proximity, l.outside ? 1 - near : 0);
+    }
+    order.sort((a, b) => weights[b] - weights[a]);
+    for (let s = 0; s < LAMP_SLOTS; s++) {
+      const light = lamps.current[s];
+      if (!light) continue;
+      const l = interiorLights[order[s]];
+      light.position.set(l.pos[0], l.pos[1], l.pos[2]);
+      light.distance = l.distance;
+      light.intensity = lit * l.intensity * weights[order[s]];
+    }
   });
 
   return (
-    <directionalLight
-      ref={sun}
-      position={SUN}
-      color="#ffd2a4"
-      intensity={0}
-      castShadow
-      shadow-mapSize={env.mobile ? [2048, 2048] : [4096, 4096]}
-      shadow-bias={-0.0003}
-      shadow-normalBias={0.06}
-      shadow-radius={env.mobile ? 3 : 5}
-    >
-      <orthographicCamera attach="shadow-camera" args={[-62, 62, 50, -50, 1, 260]} />
-    </directionalLight>
+    <>
+      <directionalLight
+        ref={sun}
+        position={SUN}
+        color="#ffd2a4"
+        intensity={0}
+        castShadow
+        shadow-mapSize={env.mobile ? [2048, 2048] : [4096, 4096]}
+        shadow-bias={-0.0003}
+        shadow-normalBias={0.06}
+        shadow-radius={env.mobile ? 3 : 5}
+      >
+        <orthographicCamera attach="shadow-camera" args={[-62, 62, 50, -50, 1, 260]} />
+      </directionalLight>
+      {/* warm lamp light indoors: present from the start (so shaders compile once), lit with the rest */}
+      {Array.from({ length: LAMP_SLOTS }, (_, i) => (
+        <pointLight
+          key={i}
+          ref={(el) => {
+            lamps.current[i] = el;
+          }}
+          color="#ffc48c"
+          intensity={0}
+          distance={14}
+          decay={2}
+        />
+      ))}
+    </>
   );
 }
 

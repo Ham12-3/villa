@@ -1,6 +1,7 @@
 /**
  * The scroll story: copy, scroll ranges and camera keyframes for each chapter.
- * Ranges are percentages of the total scroll length (0..100).
+ * Positions are in story units: the original eight chapters run 0..100 and the
+ * interior continues to STORY_END. The page scroll maps linearly onto 0..STORY_END.
  */
 
 export interface CameraPose {
@@ -12,6 +13,8 @@ export interface CameraPose {
   polar: number;
   /** degrees around the building, 0 = garden front */
   azimuth: number;
+  /** vertical field of view in degrees (default 30: long lens, near-orthographic) */
+  fov?: number;
 }
 
 export interface Chapter {
@@ -25,9 +28,17 @@ export interface Chapter {
   end: number;
   /** scroll position where the chapter is fully settled (rail jumps + reduced motion) */
   rest: number;
+  /** if set, the copy leaves at this position instead of at the end of the chapter */
+  copyOut?: number;
 }
 
-export const TOTAL_VH = 900;
+import { TOUR_END } from './tour';
+
+/** last story unit: the end of the walkthrough */
+export const STORY_END = TOUR_END;
+
+/** page height: 9 viewport-heights per 100 story units, as before */
+export const TOTAL_VH = (900 * STORY_END) / 100;
 
 export const chapters: Chapter[] = [
   {
@@ -117,12 +128,122 @@ export const chapters: Chapter[] = [
     description: 'Five suites, a rooftop pavilion and 1,600 square metres of quiet.',
     start: 92,
     end: 100,
-    rest: 100,
+    rest: 99.4,
+  },
+  {
+    id: 'interior',
+    rail: 'Interior',
+    eyebrow: '09 — Interior',
+    title: 'Step inside',
+    description: 'Across the pool terrace and through the glass. The tour begins.',
+    start: 100,
+    end: 121,
+    rest: 119.4,
+  },
+  {
+    id: 'living',
+    rail: 'Living',
+    eyebrow: '10 — Living',
+    title: 'Living room',
+    description: 'Double height, a wall of fire and stone, and the gallery overhead.',
+    start: 121,
+    end: 130,
+    rest: 125,
+  },
+  {
+    id: 'lobby',
+    rail: 'Lobby',
+    eyebrow: '11 — Lobby',
+    title: 'Entrance lobby',
+    description: 'The arrival hall: stone floor, a round table and a tall mirror.',
+    start: 130,
+    end: 139,
+    rest: 135,
+  },
+  {
+    id: 'dining',
+    rail: 'Dining',
+    eyebrow: '12 — Dining',
+    title: 'Dining room',
+    description: 'A table for eight, open to the living room and the pool loggia.',
+    start: 139,
+    end: 150.5,
+    rest: 149,
+  },
+  {
+    id: 'kitchen',
+    rail: 'Kitchen',
+    eyebrow: '13 — Kitchen',
+    title: 'Kitchen',
+    description: 'A stone island with four seats, and a long run under the windows.',
+    start: 150.5,
+    end: 160.5,
+    rest: 158,
+  },
+  {
+    id: 'gallery',
+    rail: 'Gallery',
+    eyebrow: '14 — Gallery',
+    title: 'Stair and gallery',
+    description: 'Up one flight to the first floor, looking back down into the living room.',
+    start: 160.5,
+    end: 177.5,
+    rest: 173,
+  },
+  {
+    id: 'bathroom',
+    rail: 'Bathroom',
+    eyebrow: '15 — Bathroom',
+    title: 'Bathroom',
+    description: 'A freestanding bath by the window, double vanity, shower and WC.',
+    start: 177.5,
+    end: 187,
+    rest: 183,
+  },
+  {
+    id: 'bedroom',
+    rail: 'Bedroom',
+    eyebrow: '16 — Bedroom',
+    title: 'Master bedroom',
+    description: 'A calm suite opening onto its own cantilevered terrace.',
+    start: 187,
+    end: 198,
+    rest: 193,
+  },
+  {
+    id: 'pool',
+    rail: 'Pool',
+    eyebrow: '17 — Pool',
+    title: 'Swimming pool',
+    description: 'Out over the terrace rail and down to the water, twenty-three metres long.',
+    start: 198,
+    end: 212,
+    rest: 209.5,
+  },
+  {
+    id: 'lounge',
+    rail: 'Lounge',
+    eyebrow: '18 — Lounge',
+    title: 'Pool lounge',
+    description: 'Behind the arches: sofas, daybeds and a bar, open to the evening air.',
+    start: 212,
+    end: 224,
+    rest: 221,
+  },
+  {
+    id: 'garden',
+    rail: 'Garden',
+    eyebrow: '19 — Garden',
+    title: 'Garden',
+    description: 'Across the lawn between the olives, and a last look back at the house.',
+    start: 224,
+    end: STORY_END,
+    rest: STORY_END,
   },
 ];
 
 export interface CameraKey {
-  /** scroll position (0..100) at which the camera passes through this pose */
+  /** story position at which the camera passes through this pose */
   at: number;
   pose: CameraPose;
 }
@@ -133,13 +254,16 @@ const key = (
   radius: number,
   polar: number,
   azimuth: number,
-): CameraKey => ({ at, pose: { target, radius, polar, azimuth } });
+  fov = 30,
+): CameraKey => ({ at, pose: { target, radius, polar, azimuth, fov } });
 
 /**
  * Keyframes of the single camera spline (see animation/cameraPath.ts).
  * It starts straight above the sheet, holds plan view while the drawings are
  * made, then tilts once, slowly and continuously, craning down and around to
  * a low three-quarter view of the finished house. Tilt only ever increases.
+ *
+ * At 100 the walkthrough in data/tour.ts takes over from this pose.
  */
 export const cameraPath: CameraKey[] = [
   key(0, [-8, 0, 1], 172, 0.4, 0),
@@ -171,7 +295,7 @@ export const cameraPathMobile: CameraKey[] = [
 
 export const railChapters = chapters.filter((c) => c.rail);
 
-/** index of the chapter containing scroll position p (0..100) */
+/** index of the chapter containing story position p */
 export function chapterAt(p: number): number {
   for (let i = chapters.length - 1; i >= 0; i--) {
     if (p >= chapters[i].start) return i;
