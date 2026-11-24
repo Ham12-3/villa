@@ -10,7 +10,8 @@ interface Props {
 /** Fixed left rail listing the chapters; click to jump. */
 export function ProgressRail({ items, onJump }: Props) {
   return (
-    <nav className="rail" aria-label="Chapters">
+    // hidden on the landing page (see setActiveRail): the title has the stage to itself
+    <nav className="rail is-hidden" aria-label="Chapters">
       <ol>
         {chapters.map((c, i) =>
           c.rail ? (
@@ -51,6 +52,10 @@ export function setRailProgress(items: (HTMLButtonElement | null)[], percent: nu
 
 /** Highlights the active chapter without going through React state. */
 export function setActiveRail(items: (HTMLButtonElement | null)[], active: number) {
+  // the rail only appears once the story is under way: chapters without a
+  // rail entry (the landing page) hide it
+  const nav = items.find((el) => el)?.closest('.rail');
+  nav?.classList.toggle('is-hidden', !chapters[active]?.rail);
   items.forEach((el, i) => {
     if (!el) return;
     const on = i === active;
