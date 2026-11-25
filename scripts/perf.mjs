@@ -15,7 +15,7 @@ for (const q of queries) {
   page.on('requestfinished', (r) => requests.push(r.url()));
   const t0 = Date.now();
   await page.goto(base + q);
-  await page.waitForSelector('.loader.is-done', { timeout: 90000 });
+  await page.waitForSelector('.loader.is-done', { timeout: 90000, state: 'attached' });
   const ready = Date.now() - t0;
   await page.waitForTimeout(3500);
 

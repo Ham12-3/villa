@@ -29,6 +29,7 @@ import { buildGrid, buildSiteLines, buildSiteSolids } from './builders/buildSite
 import { buildPlanters, buildTower } from './builders/buildRooftop';
 import { buildInterior } from './builders/buildInterior';
 import { glassClear } from '../data/tour';
+import { buildLeafCards, leafTexture, makeLeafMaterial } from './foliage';
 
 type Num = (s: State) => number;
 
@@ -243,9 +244,16 @@ export async function assembleVilla(onProgress: (p: number, label: string) => vo
         { solids: [[slab.solid, 'slab']], lines: slab.edges },
         { reveal: { drop: i === 0 ? [0, 0, 0] : [0, 9, 0] }, prog: (s) => s[slabKey] },
       );
-      const walls = buildWalls(level.walls, level.elevation, i * 5);
+      // the ground floor is masonry outside and limewashed plaster inside
+      const walls = buildWalls(level.walls, level.elevation, i * 5, i === 0 ? level.slab.poly : undefined);
       part(
-        { solids: [[walls.solid, i === 0 ? 'stone' : 'render']], lines: walls.edges },
+        {
+          solids: [
+            [walls.solid, i === 0 ? 'stone' : 'render'],
+            [walls.lining, 'plaster'],
+          ],
+          lines: walls.edges,
+        },
         { reveal: { growAxis: [0, 1, 0], stagger: 0.9 }, prog: (s) => s[wallKey] },
       );
     });
@@ -320,11 +328,13 @@ export async function assembleVilla(onProgress: (p: number, label: string) => vo
     // to materialise, and is lit up by the same sweep as everything else.
     const inside = buildInterior();
     const built: Num = (s) => (s.mat > 0.001 ? 1 : 0);
+    // lights, lamp shades, glass and sheers throw no shadow
+    const shadowless = new Set<SolidKind>(['glow', 'shade', 'screen', 'sheer', 'fire']);
     for (const [kind, set] of inside.boxes) {
-      part({ boxes: [set, kind] }, { prog: built, opacity: () => 0 });
+      part({ boxes: [set, kind] }, { prog: built, opacity: () => 0, shadows: !shadowless.has(kind) });
     }
     for (const [kind, geom] of inside.round) {
-      part({ solids: [[geom, kind]] }, { prog: built, shadows: kind !== 'glow' });
+      part({ solids: [[geom, kind]] }, { prog: built, shadows: !shadowless.has(kind) });
     }
   });
 
@@ -339,6 +349,21 @@ export async function assembleVilla(onProgress: (p: number, label: string) => vo
       { solids: [[garden.cypress, 'cypress'], [garden.olive, 'olive'], [garden.trunks, 'trunk']], lines: garden.lines },
       { reveal: { growAxis: [1, 1, 1], stagger: 1.6 }, prog: (s) => s.treesGarden, opacity: () => 0.9 },
     );
+
+    // The leaves themselves: cut-out sprays over every crown. Like the
+    // furniture they are no part of the drawing; they arrive with the sweep.
+    const cards = track(buildLeafCards([...roofTrees.sprays, ...garden.sprays]));
+    const leaves = new THREE.Mesh(cards, track(makeLeafMaterial(track(leafTexture()))));
+    leaves.castShadow = true;
+    leaves.receiveShadow = true;
+    leaves.frustumCulled = false;
+    leaves.matrixAutoUpdate = false;
+    leaves.visible = false;
+    root.add(leaves);
+    triangles += cards.getAttribute('position').count / 3;
+    drivers.push((s) => {
+      leaves.visible = s.mat > 0.001;
+    });
   });
 
   // run the steps, yielding to the browser between each

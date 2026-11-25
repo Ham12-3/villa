@@ -38,14 +38,24 @@ export const SKY_GLSL = /* glsl */ `
     h.y = 0.085;
     return textureLod(uSkyMap, skyUv(normalize(h)), 5.5).rgb * uSkyGain;
   }
+  // far hills and tree lines, as a soft uneven edge to the land
+  float skyRidge(float a) {
+    return 0.5 + 0.5 * (sin(a * 5.0 + 1.3) * 0.46 + sin(a * 13.0 + 4.1) * 0.3 + sin(a * 31.0 + 0.6) * 0.16 + sin(a * 83.0) * 0.08);
+  }
   vec3 skyColor(vec3 d) {
     vec3 haze = skyHaze(d);
     float up = d.y;
+    float az = atan(d.z, d.x);
     d.y = max(d.y, 0.004);
     // (explicit level: the lookup wraps in azimuth, where automatic mip
     // selection would draw a seam)
     vec3 c = textureLod(uSkyMap, skyUv(normalize(d)), 0.0).rgb * uSkyGain;
-    return mix(haze, c, smoothstep(0.0, 0.075, up));
+    c = mix(haze, c, smoothstep(0.0, 0.075, up));
+    float far = 0.004 + 0.011 * skyRidge(az);
+    float near = 0.0015 + 0.006 * skyRidge(az * 1.7 + 2.0) + 0.0012 * sin(az * 240.0) * sin(az * 131.0);
+    c = mix(c, mix(haze, vec3(0.085, 0.1, 0.105), 0.34), 1.0 - smoothstep(far - 0.0007, far + 0.0007, up));
+    c = mix(c, mix(haze, vec3(0.03, 0.045, 0.03), 0.5), 1.0 - smoothstep(near - 0.0006, near + 0.0006, up));
+    return c;
   }
 `;
 

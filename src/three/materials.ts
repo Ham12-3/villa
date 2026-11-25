@@ -205,7 +205,19 @@ export type SolidKind =
   | 'fabricDark'
   | 'ceramic'
   | 'mirror'
-  | 'brass';
+  | 'brass'
+  | 'plaster'
+  | 'marble'
+  | 'marbleDark'
+  | 'tileStone'
+  | 'accent'
+  | 'steel'
+  | 'glassDark'
+  | 'screen'
+  | 'sheer'
+  | 'hedge'
+  | 'shade'
+  | 'fire';
 
 interface SolidSpec {
   color: string;
@@ -231,6 +243,11 @@ interface SolidSpec {
   emissiveIntensity?: number;
   /** extra shader behaviour */
   mode?: 'glass' | 'water' | 'foliage';
+  /** veined stone: colour of the veins */
+  vein?: string;
+  veinAmount?: number;
+  /** cut into square tiles of texSize metres, with grout joints */
+  tiles?: boolean;
   /** absent (discarded) until the materialisation front reaches it */
   dissolve?: boolean;
 }
@@ -271,9 +288,10 @@ const SOLIDS: Record<SolidKind, SolidSpec> = {
     envIntensity: 1.7,
     mode: 'water',
   },
-  cypress: { color: '#2c3f2a', roughness: 1, metalness: 0, noise: 0.55, noiseFreq: 2.4, mode: 'foliage' },
-  olive: { color: '#56664a', roughness: 1, metalness: 0, noise: 0.5, noiseFreq: 2.0, mode: 'foliage' },
-  trunk: { color: '#4b3b2e', roughness: 1, metalness: 0, noise: 0.3, noiseFreq: 3 },
+  cypress: { color: '#33492f', roughness: 1, metalness: 0, noise: 0.55, noiseFreq: 2.4, mode: 'foliage', doubleSide: true },
+  olive: { color: '#75866a', roughness: 1, metalness: 0, noise: 0.5, noiseFreq: 2.0, mode: 'foliage', doubleSide: true },
+  hedge: { color: '#3d5235', roughness: 1, metalness: 0, noise: 0.5, noiseFreq: 1.6, mode: 'foliage', doubleSide: true },
+  trunk: { color: '#5b5046', roughness: 1, metalness: 0, noise: 0.3, noiseFreq: 3 },
   // interior fit-out
   floor: { color: '#c7a480', roughness: 0.78, metalness: 0, tex: 'wood', texSize: 2.4, normalScale: 0.35 },
   rug: { color: '#93877a', roughness: 1, metalness: 0, noise: 0.3, noiseFreq: 9 },
@@ -285,6 +303,21 @@ const SOLIDS: Record<SolidKind, SolidSpec> = {
   ceramic: { color: '#efece6', roughness: 0.28, metalness: 0, noise: 0.05, noiseFreq: 1.3 },
   mirror: { color: '#d5dcde', roughness: 0.04, metalness: 1, envIntensity: 1.5 },
   brass: { color: '#b48d52', roughness: 0.32, metalness: 1 },
+  // limewash on the inside face of the ground-floor walls
+  plaster: { color: '#e9e2d5', roughness: 0.94, metalness: 0, noise: 0.085, noiseFreq: 0.5 },
+  // honed pale marble with grey-brown veins, and its dark book-matched twin
+  marble: { color: '#efebe4', roughness: 0.22, metalness: 0, noise: 0.05, noiseFreq: 0.55, vein: '#8f867b' },
+  marbleDark: { color: '#3b3632', roughness: 0.3, metalness: 0, noise: 0.1, noiseFreq: 0.5, vein: '#8f7c64', veinAmount: 0.5 },
+  // large-format limestone tiles
+  tileStone: { color: '#d8cfbf', roughness: 0.5, metalness: 0, noise: 0.07, noiseFreq: 0.9, vein: '#b9ad99', veinAmount: 0.45, tiles: true, texSize: 1.2 },
+  // flames in the fire slot
+  fire: { color: '#1a0c06', roughness: 1, metalness: 0, emissive: '#ff7b2e', emissiveIntensity: 2.6 },
+  accent: { color: '#9d7a63', roughness: 1, metalness: 0, noise: 0.16, noiseFreq: 14 },
+  steel: { color: '#a3a29e', roughness: 0.34, metalness: 1 },
+  glassDark: { color: '#0d0d0e', roughness: 0.07, metalness: 0.55, envIntensity: 1.6 },
+  screen: { color: '#cfdcdc', roughness: 0.04, metalness: 0.3, transparent: true, opacity: 0.2, darkAlpha: 0, doubleSide: true, envIntensity: 2 },
+  sheer: { color: '#f3efe8', roughness: 1, metalness: 0, transparent: true, opacity: 0.5, darkAlpha: 0, doubleSide: true },
+  shade: { color: '#e9dcc6', roughness: 0.9, metalness: 0, emissive: '#ffc58a', emissiveIntensity: 1.5 },
 };
 
 export interface SolidUniforms extends RevealUniforms {
@@ -297,6 +330,8 @@ export interface SolidUniforms extends RevealUniforms {
   uTexSize: { value: number };
   uNoise: { value: number };
   uNoiseFreq: { value: number };
+  uVein: { value: THREE.Color };
+  uVeinAmt: { value: number };
 }
 
 export type SolidMaterial = (THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial) & {
@@ -316,6 +351,8 @@ const FRAG_PARS = /* glsl */ `
   uniform float uTexSize;
   uniform float uNoise;
   uniform float uNoiseFreq;
+  uniform vec3 uVein;
+  uniform float uVeinAmt;
   varying float vG;
   varying vec3 vWPos;
   varying vec3 vWNrm;
@@ -395,6 +432,8 @@ export function makeSolidMaterial(kind: SolidKind, c: RevealConfig = {}, lite = 
   if (s.dissolve) m.defines = { ...m.defines, VILLA_DISSOLVE: '' };
   if (s.mode === 'water') m.defines = { ...m.defines, VILLA_WATER: '' };
   if (s.mode === 'foliage') m.defines = { ...m.defines, VILLA_FOLIAGE: '' };
+  if (s.vein) m.defines = { ...m.defines, VILLA_MARBLE: '' };
+  if (s.tiles) m.defines = { ...m.defines, VILLA_TILES: '' };
 
   const u: SolidUniforms = {
     ...revealUniforms(c),
@@ -407,6 +446,8 @@ export function makeSolidMaterial(kind: SolidKind, c: RevealConfig = {}, lite = 
     uTexSize: { value: s.texSize ?? 1 },
     uNoise: { value: s.noise ?? 0 },
     uNoiseFreq: { value: s.noiseFreq ?? 1 },
+    uVein: { value: new THREE.Color(s.vein ?? '#000000') },
+    uVeinAmt: { value: s.veinAmount ?? 1 },
   };
   m.userData.u = u;
 
@@ -445,10 +486,46 @@ export function makeSolidMaterial(kind: SolidKind, c: RevealConfig = {}, lite = 
         ${boxUv(C.map_fragment, 'vMapUv')}
         float vVar = vFbm(vWPos * uNoiseFreq) - 0.5;
         diffuseColor.rgb *= 1.0 + vVar * uNoise;
+        #ifdef VILLA_MARBLE
+          // veins: two families of thin ridges through a warped field
+          vec3 mp = vWPos * uNoiseFreq * 1.6;
+          float mw = vFbm(mp * 0.5 + 3.1) * 3.2 + vFbm(mp * 2.3) * 0.5;
+          // (a vein is where the field crosses zero: a hairline with a faint bleed)
+          float a1 = abs(sin(dot(mp, vec3(1.1, 0.8, 0.95)) * 1.25 + mw));
+          float a2 = abs(sin(dot(mp, vec3(-0.6, 1.2, 1.5)) * 1.9 + mw * 1.4 + 1.7));
+          float v1 = (1.0 - smoothstep(0.0, 0.03, a1)) * 0.75 + (1.0 - smoothstep(0.0, 0.22, a1)) * 0.2;
+          float v2 = (1.0 - smoothstep(0.0, 0.02, a2)) * 0.5;
+          float cloud = smoothstep(0.3, 0.8, vFbm(mp * 0.35 + 9.0));
+          diffuseColor.rgb = mix(diffuseColor.rgb, uVein, clamp(v1 + v2, 0.0, 0.85) * (0.3 + 0.7 * cloud) * uVeinAmt);
+          diffuseColor.rgb = mix(diffuseColor.rgb, uVein, cloud * 0.08 * uVeinAmt);
+        #endif
+        #ifdef VILLA_TILES
+          // square tiles with a fine grout joint and a slightly different tone each
+          vec2 tq = boxUv;
+          vec2 tcell = floor(tq);
+          vec2 tg = abs(fract(tq) - 0.5);
+          float tedge = 0.5 - max(tg.x, tg.y);
+          float taa = fwidth(tq.x) + fwidth(tq.y);
+          float grout = 1.0 - smoothstep(0.003 / uTexSize, 0.003 / uTexSize + taa, tedge);
+          diffuseColor.rgb *= 0.95 + 0.1 * vHash(vec3(tcell, 3.0));
+          diffuseColor.rgb *= 1.0 - grout * 0.3 / (1.0 + taa * 60.0);
+        #endif
         #ifdef VILLA_FOLIAGE
           // leaf-scale speckle and a darker underside
           diffuseColor.rgb *= 0.8 + 0.34 * vNoise(vWPos * 11.0);
           diffuseColor.rgb *= 0.72 + 0.28 * smoothstep(-0.6, 0.5, normalize(vWNrm).y);
+          // sun-bleached and shaded patches across the crown
+          diffuseColor.rgb *= 0.82 + 0.4 * vNoise(vWPos * 1.9 + 5.0);
+          // leaves, not a skin: holes through the surface, more of them towards
+          // the silhouette, fading out with distance (where they would shimmer)
+          if (sweepAt(vWPos, 0.0) > 0.5) {
+            vec3 toEye = cameraPosition - vWPos;
+            float fd = length(toEye);
+            float rim = 1.0 - abs(dot(normalize(vWNrm), toEye / fd));
+            float leaf = vNoise(vWPos * 27.0) * 0.6 + vNoise(vWPos * 63.0 + 2.0) * 0.4;
+            float cut = (0.13 + rim * rim * 0.5) * (1.0 - smoothstep(24.0, 70.0, fd));
+            if (leaf < cut) discard;
+          }
         #endif
         `,
       )

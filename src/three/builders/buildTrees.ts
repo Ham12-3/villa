@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Tree } from '../../data/villa';
 import { LineBuilder, MeshBuilder, rng, type P3 } from './geo';
+import type { Spray } from '../foliage';
 
 /** Clean circle in the plane spanned by u and v. */
 export function circle(centre: P3, u: P3, v: P3, radius: number, segments = 48): P3[] {
@@ -43,6 +44,9 @@ export function buildTrees(trees: Tree[], seed = 1) {
   const olive = new MeshBuilder();
   const trunks = new MeshBuilder();
   const rand = rng(seed * 9973 + 17);
+  // (leaf cards have their own sequence, so adding them moves no tree)
+  const rs = rng(seed * 331 + 5);
+  const sprays: Spray[] = [];
 
   trees.forEach((t, ti) => {
     const [x, z] = t.pos;
@@ -57,19 +61,37 @@ export function buildTrees(trees: Tree[], seed = 1) {
       const h = t.base + t.height - skirt;
 
       // solid: lathe-like surface, sculpted, then smooth normals
-      const radial = 16;
-      const rows = 22;
+      const radial = 22;
+      const rows = 40;
       const g = new THREE.CylinderGeometry(1, 1, 1, radial, rows, true);
       const p = g.getAttribute('position');
       for (let i = 0; i < p.count; i++) {
         const ty = p.getY(i) + 0.5;
         const a = Math.atan2(p.getZ(i), p.getX(i));
-        const rr = r * cypressProfile(ty) * (1 + 0.09 * sculpt(Math.cos(a) * 2, ty * 9, Math.sin(a) * 2, s));
+        // tight columns of foliage: broad lobes, with a finer ragged layer on top
+        const rr =
+          r *
+          cypressProfile(ty) *
+          (1 + 0.1 * sculpt(Math.cos(a) * 2, ty * 9, Math.sin(a) * 2, s) + 0.07 * sculpt(Math.cos(a) * 7, ty * 31, Math.sin(a) * 7, s + 3));
         p.setXYZ(i, x + Math.cos(a) * rr, skirt + ty * h, z + Math.sin(a) * rr);
       }
       g.computeVertexNormals();
       g.deleteAttribute('uv');
       cypress.add(g, o);
+
+      // upswept sprays all over the column
+      for (let q = 0; q < 380; q++) {
+        const ty = 0.03 + rs() * 0.95;
+        const a = rs() * Math.PI * 2;
+        const rr = r * cypressProfile(ty) * 0.98;
+        sprays.push({
+          p: [x + Math.cos(a) * rr, skirt + ty * h, z + Math.sin(a) * rr],
+          n: [Math.cos(a) * 0.8, 0.6, Math.sin(a) * 0.8],
+          out: [Math.cos(a) * 0.92, 0.39, Math.sin(a) * 0.92],
+          size: 0.5 + rs() * 0.45,
+          kind: 'cypress',
+        });
+      }
 
       const tg = new THREE.CylinderGeometry(0.07 * r + 0.04, 0.1 * r + 0.06, skirt - t.base + 0.3, 8, 1);
       tg.deleteAttribute('uv');
@@ -96,40 +118,90 @@ export function buildTrees(trees: Tree[], seed = 1) {
 
     // ---- olive
     const cy = t.base + t.height - r * 0.95;
-    const blobs: [number, number, number, number][] = [
-      [0, 0, 0, 0.86],
-      [r * 0.42, r * 0.1, r * 0.22, 0.6],
-      [-r * 0.38, -r * 0.02, -r * 0.3, 0.62],
-      [r * 0.05, r * 0.34, -r * 0.26, 0.52],
-      [-r * 0.2, r * 0.2, r * 0.36, 0.5],
-    ];
-    for (const [bx, by, bz, k] of blobs) {
-      const g = new THREE.SphereGeometry(r * k, 20, 14);
-      const p = g.getAttribute('position');
-      for (let i = 0; i < p.count; i++) {
-        const px = p.getX(i);
-        const py = p.getY(i);
-        const pz = p.getZ(i);
-        const d = 1 + 0.14 * sculpt((px / r) * 3, (py / r) * 3, (pz / r) * 3, s + bx);
-        p.setXYZ(i, x + bx + px * d, cy + by + py * d * 0.86, z + bz + pz * d);
-      }
-      g.computeVertexNormals();
-      g.deleteAttribute('uv');
-      olive.add(g, o);
-    }
     const lean = (rand() - 0.5) * 0.3;
     const th = cy - r * 0.35 - t.base;
-    const tg = new THREE.CylinderGeometry(0.05 * r + 0.035, 0.09 * r + 0.06, th, 8, 1);
-    tg.deleteAttribute('uv');
-    tg.rotateZ(-lean * 0.25);
-    tg.translate(x + lean * 0.3, t.base + th / 2, z);
-    trunks.add(tg, o);
-    for (const side of [-1, 1]) {
-      const bg = new THREE.CylinderGeometry(0.03 * r + 0.02, 0.05 * r + 0.03, r * 0.9, 6, 1);
-      bg.deleteAttribute('uv');
-      bg.rotateZ(side * 0.6);
-      bg.translate(x + lean * 0.3 - side * r * 0.24, t.base + th + r * 0.2, z + side * r * 0.08);
-      trunks.add(bg, o);
+    const fork: P3 = [x + lean * 0.3, t.base + th, z];
+
+    // a tapered limb between two points
+    const limb = (a: P3, b: P3, ra: number, rb: number) => {
+      const dir = new THREE.Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+      const len = dir.length();
+      const lg = new THREE.CylinderGeometry(rb, ra, len, 7, 1);
+      lg.deleteAttribute('uv');
+      lg.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize()));
+      lg.translate((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
+      trunks.add(lg, o);
+    };
+
+    // short, thick, slightly twisted trunk in two lifts, then four or five boughs
+    const knee: P3 = [x + lean * 0.5 + (rand() - 0.5) * 0.16 * r, t.base + th * 0.4, z + (rand() - 0.5) * 0.18 * r];
+    const hip: P3 = [x + lean * 0.1 + (rand() - 0.5) * 0.16 * r, t.base + th * 0.75, z + (rand() - 0.5) * 0.16 * r];
+    limb([x, t.base - 0.05, z], knee, 0.075 * r + 0.06, 0.06 * r + 0.045);
+    limb(knee, hip, 0.06 * r + 0.045, 0.05 * r + 0.035);
+    limb(hip, fork, 0.05 * r + 0.035, 0.045 * r + 0.03);
+    const boughs = 4 + Math.floor(rand() * 2);
+    const tips: P3[] = [];
+    for (let k = 0; k < boughs; k++) {
+      const a = (k / boughs) * Math.PI * 2 + rand() * 0.9;
+      const reach = r * (0.42 + rand() * 0.2);
+      const tip: P3 = [fork[0] + Math.cos(a) * reach, cy + r * (-0.12 + rand() * 0.3), fork[2] + Math.sin(a) * reach];
+      limb(fork, tip, 0.04 * r + 0.025, 0.015 * r + 0.01);
+      tips.push(tip);
+    }
+
+    // crown: many small clumps of foliage gathered round the bough ends, so the
+    // outline is broken and the sky shows through between them. Normals lean
+    // towards the crown's own outward direction, which lights it as one mass.
+    const centre = new THREE.Vector3(x + lean * 0.3, cy + r * 0.08, z);
+    const clumps = Math.round(40 + r * 11);
+    for (let k = 0; k < clumps; k++) {
+      const tip = tips[k % tips.length];
+      const ca = rand() * Math.PI * 2;
+      const cr = Math.sqrt(rand()) * r * 0.5;
+      const px = tip[0] + Math.cos(ca) * cr;
+      const pz = tip[2] + Math.sin(ca) * cr;
+      // keep inside a flattened dome over the fork
+      const dx = (px - centre.x) / (r * 1.05);
+      const dz = (pz - centre.z) / (r * 1.05);
+      const dome = Math.sqrt(Math.max(0, 1 - dx * dx - dz * dz));
+      const py = cy - r * 0.3 + rand() * (0.3 + dome * 0.75) * r;
+      const size = r * (0.17 + rand() * 0.15);
+      const g = new THREE.SphereGeometry(size, 12, 9);
+      const p = g.getAttribute('position');
+      const sk = s + k * 1.7;
+      for (let i = 0; i < p.count; i++) {
+        const vx = p.getX(i);
+        const vy = p.getY(i);
+        const vz = p.getZ(i);
+        const d =
+          1 +
+          0.28 * sculpt((vx / size) * 2.2, (vy / size) * 2.2, (vz / size) * 2.2, sk) +
+          0.16 * sculpt((vx / size) * 6.1, (vy / size) * 6.1, (vz / size) * 6.1, sk + 9);
+        p.setXYZ(i, px + vx * d, py + vy * d * 0.8, pz + vz * d);
+      }
+      g.computeVertexNormals();
+      const n = g.getAttribute('normal');
+      const out = new THREE.Vector3();
+      for (let i = 0; i < p.count; i++) {
+        out.set(p.getX(i) - centre.x, (p.getY(i) - (cy - r * 0.2)) * 1.3, p.getZ(i) - centre.z).normalize();
+        out.multiplyScalar(0.6).add(new THREE.Vector3(n.getX(i), n.getY(i), n.getZ(i)).multiplyScalar(0.4)).normalize();
+        n.setXYZ(i, out.x, out.y, out.z);
+      }
+      g.deleteAttribute('uv');
+      olive.add(g, o);
+
+      // sprays of leaves standing off the clump, those facing into the crown left out
+      for (let q = 0; q < 12; q++) {
+        const u = rs() * 2 - 1;
+        const a2 = rs() * Math.PI * 2;
+        const sq = Math.sqrt(1 - u * u);
+        const dir: P3 = [sq * Math.cos(a2), u, sq * Math.sin(a2)];
+        const pos: P3 = [px + dir[0] * size * 0.92, py + dir[1] * size * 0.74, pz + dir[2] * size * 0.92];
+        out.set(pos[0] - centre.x, (pos[1] - (cy - r * 0.2)) * 1.3, pos[2] - centre.z).normalize();
+        const spread = rs();
+        if (dir[0] * out.x + dir[1] * out.y + dir[2] * out.z < -0.25) continue;
+        sprays.push({ p: pos, n: dir, out: [out.x, out.y, out.z], size: Math.max(0.34, size * (1.25 + spread * 0.7)), kind: 'olive' });
+      }
     }
 
     // drawing: crown as three clean great circles, a ground-plane ring, trunk
@@ -144,7 +216,7 @@ export function buildTrees(trees: Tree[], seed = 1) {
     lines.polyline([[x, t.base, z], [x + lean * 0.3, cy - r * 0.86, z]], { ...o, shade: 0.85 });
   });
 
-  return { lines: lines.build(), cypress: cypress.build(), olive: olive.build(), trunks: trunks.build() };
+  return { lines: lines.build(), cypress: cypress.build(), olive: olive.build(), trunks: trunks.build(), sprays };
 }
 
 export { X as AXIS_X, Y as AXIS_Y, Z as AXIS_Z };

@@ -23,7 +23,7 @@ const DRAW_DISTANCE = 64;
 const paper = { value: new THREE.Color(COLORS.paper) };
 
 /** Makes a glTF material appear with the same materialisation front as the house. */
-function joinSweep(m: THREE.Material) {
+export function joinSweep(m: THREE.Material) {
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uSweep = shared.uSweep;
     shader.uniforms.uPaper = paper;
