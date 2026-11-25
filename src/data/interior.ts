@@ -8,6 +8,8 @@
  * finishes sit on y 0, first-floor ones on y 4.
  */
 
+import { stairs, type Stair } from './villa';
+
 export type InteriorMaterial =
   | 'floor'
   | 'rug'
@@ -526,7 +528,93 @@ const bedroom: Piece[] = [
   ...downlights(13.5, 22.5, -4.4, 0.4, F + CEIL, 4, 2),
 ];
 
-export const pieces: Piece[] = [...living, ...dining, ...kitchen, ...lobby, ...lounge, ...terrace, ...bathroom, ...bedroom];
+// ---------------------------------------------------------------- stairs
+
+/**
+ * Finishes a flight from villa.ts (the structure there is one plain block per
+ * step): a sloping concrete carriage under the steps, oak treads with a
+ * nosing and a line of light beneath each, and a raked glass balustrade with
+ * a brass handrail on both sides. Flights run along +x.
+ */
+function dressStair(s: Stair): Piece[] {
+  const rise = (s.to - s.from) / s.steps;
+  const length = s.steps * s.run;
+  const slope = Math.atan2(rise, s.run);
+  const sin = Math.sin(slope);
+  const cos = Math.cos(slope);
+  const [x0, z] = s.start;
+  const raked = Math.hypot(length, s.to - s.from);
+  // a point `along` the line of the inner corners of the steps, lifted `off` square to it
+  const on = (along: number, off: number): [number, number] => [x0 + along * cos - off * sin, s.from + along * sin + off * cos];
+  const out: Piece[] = [];
+  const [cx, cy] = on(raked / 2, -0.11);
+  out.push(box('slab', [cx, cy, z], [s.width, 0.22, raked], Math.PI / 2, -slope));
+  for (let i = 0; i < s.steps - 1; i++) {
+    const front = x0 + i * s.run;
+    const top = s.from + (i + 1) * rise;
+    out.push(box('wood', [front + s.run / 2 - 0.015, top + 0.02, z], [s.run + 0.03, 0.04, s.width + 0.02]));
+    out.push(box('shade', [front - 0.012, top - 0.012, z], [0.012, 0.012, s.width - 0.16]));
+  }
+  // balustrades stand on the line of the nosings (one riser above the inner corners)
+  const lift = rise * cos;
+  for (const side of [-1, 1]) {
+    const bz = z + side * (s.width / 2 + 0.012);
+    const [gx, gy] = on(raked / 2 - 0.1, lift + 0.46);
+    out.push(box('screen', [gx, gy, bz], [0.014, 0.92, raked - 0.5], Math.PI / 2, -slope));
+    const [hx, hy] = on(raked / 2 - 0.1, lift + 0.94);
+    out.push(box('brass', [hx, hy, bz], [0.05, 0.035, raked - 0.3], Math.PI / 2, -slope));
+  }
+  return out;
+}
+
+const [flight, upperFlight] = stairs;
+/** the opening in the first floor that the flight rises through */
+const WELL = { x0: -3.2, x1: 1.6, z0: -8.8, z1: -7.2 };
+const flightEnd = flight.start[0] + flight.steps * flight.run;
+
+const stairHall: Piece[] = [
+  box('tileStone', [-2, 0.012, -9.0], [7.84, 0.024, 6.76]),
+  ...dressStair(flight),
+  ...dressStair(upperFlight),
+  // the landing that closes the well beyond the top step
+  box('slab', [(flightEnd + WELL.x1) / 2, F - 0.15, -8], [WELL.x1 - flightEnd, 0.3, WELL.z1 - WELL.z0]),
+  // oak boards on the gallery, laid round the well
+  ...(
+    [
+      [-5.92, WELL.x0, -12.35, -5.22],
+      [WELL.x1, 11.92, -12.35, -5.22],
+      [WELL.x0, WELL.x1, -12.35, WELL.z0],
+      [WELL.x0, WELL.x1, WELL.z1, -5.22],
+      [flightEnd, WELL.x1, WELL.z0, WELL.z1],
+    ] as [number, number, number, number][]
+  ).map(([xa, xb, za, zb]) => box('floor', [(xa + xb) / 2, F + 0.012, (za + zb) / 2], [xb - xa, 0.024, zb - za])),
+  // glass guarding round the well on the first floor, capped in brass
+  ...[WELL.z0 - 0.03, WELL.z1 + 0.03].flatMap((z) => [
+    box('screen', [(WELL.x0 + flightEnd) / 2, F + 0.53, z], [flightEnd - WELL.x0, 1.05, 0.014]),
+    box('brass', [(WELL.x0 + flightEnd) / 2, F + 1.07, z], [flightEnd - WELL.x0 + 0.04, 0.035, 0.05]),
+  ]),
+  box('screen', [WELL.x0 - 0.03, F + 0.53, -8], [0.014, 1.05, WELL.z1 - WELL.z0 + 0.06]),
+  box('brass', [WELL.x0 - 0.03, F + 1.07, -8], [0.05, 0.035, WELL.z1 - WELL.z0 + 0.1]),
+  // a canvas on the living-room wall, a tree by the foot of the stair, spots overhead
+  box('dark', [0.2, 1.9, -5.595], [1.68, 1.18, 0.03]),
+  box('art', [0.2, 1.9, -5.61], [1.6, 1.1, 0.03]),
+  ...plant(-5.2, -11.6, 0, 1.2),
+  ...downlights(-5, 1, -12, -9.4, CEIL, 3, 1),
+  ...downlights(-5.4, -3.6, -8.4, -6.2, CEIL, 1, 2),
+  ...downlights(2, 11, -12, -6, F + CEIL, 3, 2),
+];
+
+export const pieces: Piece[] = [
+  ...living,
+  ...dining,
+  ...kitchen,
+  ...lobby,
+  ...stairHall,
+  ...lounge,
+  ...terrace,
+  ...bathroom,
+  ...bedroom,
+];
 
 // ---------------------------------------------------------------- real models
 
@@ -639,6 +727,7 @@ export const lights: { pos: V3; intensity: number; distance: number; outside?: b
   { pos: [-12.6, 2.3, -9.4], intensity: 18, distance: 12 },
   { pos: [6, 2.6, -9.6], intensity: 15, distance: 11 },
   { pos: [4, F + 2.6, -8.5], intensity: 12, distance: 12 },
+  { pos: [-3.6, 2.7, -10.2], intensity: 14, distance: 11 },
   { pos: [18.4, F + 2.5, -8.8], intensity: 16, distance: 12 },
   { pos: [-14.5, 2.5, 7.2], intensity: 18, distance: 14 },
 ];
